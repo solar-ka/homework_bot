@@ -6,17 +6,13 @@ import sys
 import requests
 import telegram
 from dotenv import load_dotenv
-from exceptions import NotUpdates
+from exceptions import NotFirstApiException, NotUpdates, MessageException
 
 load_dotenv()
 logging.basicConfig(
     level=logging.DEBUG,
-    handlers=[logging.FileHandler(
-        filename="main.log",
-        encoding='utf-8',
-        mode='a'
-    )],
-    format='%(asctime)s, %(levelname)s, %(message)s, %(name)s'
+    format='%(asctime)s, %(levelname)s, %(message)s, %(name)s',
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
@@ -39,7 +35,7 @@ def send_message(bot, message):
     """Отправляет сообщение."""
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-    except Exception as error:
+    except MessageException as error:
         logging.error(f'Ошибка при отправке сообщения: {error}')
     else:
         logging.info(f'Бот отправил сообщение: "{message}"')
@@ -50,11 +46,19 @@ def get_api_answer(current_timestamp):
     timestamp = current_timestamp or int(time.time())
     params = {'from_date': timestamp}
     homework_statuses = requests.get(ENDPOINT, headers=HEADERS, params=params)
+    count_exeptions = 0
     if homework_statuses.status_code != 200:
-        raise Exception(
-            'Ошибка при запросе к основному API: ',
-            f'status_code={homework_statuses.status_code}'
-        )
+        count_exeptions += 1
+        if count_exeptions != 1:
+            raise NotFirstApiException(
+                'Ошибка при запросе к основному API: ',
+                f'status_code={homework_statuses.status_code}'
+            )
+        else:
+            raise Exception(
+                'Ошибка при запросе к основному API: ',
+                f'status_code={homework_statuses.status_code}'
+            )
     else:
         logging.info(f'Выполнен запрос к API с параметрами: {params} ')
         return homework_statuses.json()
@@ -142,27 +146,25 @@ def main():
                 message = parse_status(homework)
             else:
                 raise NotUpdates('Список обновлений домашних работ пустой')
+
+        except (MessageException, NotFirstApiException) as error:
+            message = f'Сбой в работе программы: {error}'
+            logging.error(message)
             time.sleep(RETRY_TIME)
-
-        except TypeError as error:
-            message = f'Неверный тип переменной: {error}'
-            logging.error(message)
-
-        except KeyError as error:
-            message = f'Неверное значение ключа в словаре: {error}'
-            logging.error(message)
 
         except NotUpdates as error:
             logging.debug(error)
             time.sleep(RETRY_TIME)
 
-        except Exception as error:
+        except (TypeError, KeyError, Exception) as error:
             message = f'Сбой в работе программы: {error}'
             logging.error(message)
+            send_message(bot, message)
             time.sleep(RETRY_TIME)
 
         else:
             send_message(bot, message)
+            time.sleep(RETRY_TIME)
 
 
 if __name__ == '__main__':
