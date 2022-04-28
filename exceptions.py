@@ -14,3 +14,9 @@ class MessageException(Exception):
     """Вызывается при проблемах с отправкой сообщений."""
 
     pass
+
+
+class UncorrectStatus(Exception):
+    """Вызывается при проблемах с отправкой сообщений."""
+
+    pass

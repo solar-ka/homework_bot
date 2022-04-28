@@ -1,12 +1,16 @@
+import json
 import logging
 import os
-import time
 import sys
+import time
+from http import HTTPStatus
 
 import requests
 import telegram
 from dotenv import load_dotenv
-from exceptions import NotFirstApiException, NotUpdates, MessageException
+
+from exceptions import (MessageException, NotFirstApiException, NotUpdates,
+                        UncorrectStatus)
 
 load_dotenv()
 logging.basicConfig(
@@ -14,6 +18,7 @@ logging.basicConfig(
     format='%(asctime)s, %(levelname)s, %(message)s, %(name)s',
     handlers=[logging.StreamHandler(sys.stdout)],
 )
+logger = logging.getLogger(__name__)
 
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -35,19 +40,30 @@ def send_message(bot, message):
     """Отправляет сообщение."""
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-    except MessageException as error:
-        logging.error(f'Ошибка при отправке сообщения: {error}')
+    except telegram.TelegramError as error:
+        raise MessageException(f'Ошибка при отправке сообщения: {error}')
     else:
-        logging.info(f'Бот отправил сообщение: "{message}"')
+        logger.info(f'Бот отправил сообщение: "{message}"')
 
 
 def get_api_answer(current_timestamp):
     """Делает запрос к API яндекс-практикума."""
     timestamp = current_timestamp or int(time.time())
     params = {'from_date': timestamp}
-    homework_statuses = requests.get(ENDPOINT, headers=HEADERS, params=params)
+    try:
+        homework_statuses = requests.get(
+            ENDPOINT, headers=HEADERS, params=params
+        )
+    except requests.exceptions.HTTPError as er:
+        logger.error('Http Error:=', er)
+    except requests.exceptions.ConnectionError as er:
+        logger.error('Error Connecting:', er)
+    except requests.exceptions.Timeout as er:
+        logger.error('Timeout Error:', er)
+    except requests.exceptions.RequestException as er:
+        logger.error('Request Error:', er)
     count_exeptions = 0
-    if homework_statuses.status_code != 200:
+    if homework_statuses.status_code != HTTPStatus.OK:
         count_exeptions += 1
         if count_exeptions != 1:
             raise NotFirstApiException(
@@ -60,25 +76,26 @@ def get_api_answer(current_timestamp):
                 f'status_code={homework_statuses.status_code}'
             )
     else:
-        logging.info(f'Выполнен запрос к API с параметрами: {params} ')
-        return homework_statuses.json()
+        logger.info(f'Выполнен запрос к API с параметрами: {params} ')
+        try:
+            return homework_statuses.json()
+        except json.decoder.JSONDecodeError:
+            logger.error(' Результат запроса не представим в формате json')
 
 
 def check_response(response):
     """Проверяет, что ответ API содержит ключ homeworks."""
     if not isinstance(response, dict):
         raise TypeError(f'response не является словарём: response={response}')
-    else:
-        homeworks = response.get('homeworks')
+    homeworks = response.get('homeworks')
     if homeworks is None:
         raise KeyError('Ответ API не содержит ключа "homeworks"')
     elif not isinstance(homeworks, list):
         raise TypeError(
             f'homeworks не является списком: homeworks={homeworks}'
         )
-    else:
-        logging.info('Ответ API содержит ключ homeworks')
-        return homeworks
+    logger.info('Ответ API содержит ключ homeworks')
+    return homeworks
 
 
 def parse_status(homework):
@@ -93,40 +110,38 @@ def parse_status(homework):
         raise KeyError(
             'Домашняя работа не содержит необходимого ключа homework_status'
         )
-    else:
-        logging.info(
-            'Домашняя работа содержит необходимые ключи: ',
-            f'homework_name={homework_name}, homework_status={homework_status}'
+    logger.info(
+        'Домашняя работа содержит необходимые ключи: ',
+        f'homework_name={homework_name}, homework_status={homework_status}'
+    )
+    if homework_status not in HOMEWORK_STATUSES:
+        raise UncorrectStatus(
+            'Статус проверки работы не соответствует ожиданиям: ',
+            f'неизвестный статус{homework_status}'
         )
-        if homework_status not in HOMEWORK_STATUSES:
-            raise Exception(
-                'Статус проверки работы не соответствует ожиданиям: ',
-                f'неизвестный статус{homework_status}'
-            )
-        else:
-            verdict = HOMEWORK_STATUSES[homework_status]
-            logging.info(f'Изменился статус домашней работы: {verdict}')
-            result = (
-                f'Изменился статус проверки работы "{homework_name}".'
-                + f'{verdict}'
-            )
-            return result
+    verdict = HOMEWORK_STATUSES[homework_status]
+    logger.info(f'Изменился статус домашней работы: {verdict}')
+    result = (
+        f'Изменился статус проверки работы "{homework_name}".'
+        + f'{verdict}'
+    )
+    return result
 
 
 def check_tokens():
     """Проверяет наличие всех переменных окружения."""
     tokens_ok = True
     if not PRACTICUM_TOKEN:
-        logging.critical('Отсутствует переменная окружения PRACTICUM_TOKEN')
+        logger.critical('Отсутствует переменная окружения PRACTICUM_TOKEN')
         tokens_ok = False
     if not TELEGRAM_TOKEN:
-        logging.critical('Отсутствует переменная окружения TELEGRAM_TOKEN')
+        logger.critical('Отсутствует переменная окружения TELEGRAM_TOKEN')
         tokens_ok = False
     if not TELEGRAM_CHAT_ID:
-        logging.critical('Отсутствует переменная окружения TELEGRAM_CHAT_ID')
+        logger.critical('Отсутствует переменная окружения TELEGRAM_CHAT_ID')
         tokens_ok = False
     if not tokens_ok:
-        logging.critical('Программа принудительно остановлена.')
+        logger.critical('Программа принудительно остановлена.')
     return tokens_ok
 
 
@@ -149,16 +164,16 @@ def main():
 
         except (MessageException, NotFirstApiException) as error:
             message = f'Сбой в работе программы: {error}'
-            logging.error(message)
+            logger.error(message)
             time.sleep(RETRY_TIME)
 
         except NotUpdates as error:
-            logging.debug(error)
+            logger.debug(error)
             time.sleep(RETRY_TIME)
 
-        except (TypeError, KeyError, Exception) as error:
+        except (TypeError, KeyError, UncorrectStatus, Exception) as error:
             message = f'Сбой в работе программы: {error}'
-            logging.error(message)
+            logger.error(message)
             send_message(bot, message)
             time.sleep(RETRY_TIME)
 
