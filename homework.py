@@ -9,8 +9,8 @@ import requests
 import telegram
 from dotenv import load_dotenv
 
-from exceptions import (MessageException, NotFirstApiException, NotUpdates,
-                        UncorrectStatus)
+from exceptions import (APIException, JsonException, MessageException,
+                        NotFirstApiException, NotUpdates, UncorrectStatus)
 
 load_dotenv()
 logging.basicConfig(
@@ -54,13 +54,13 @@ def get_api_answer(current_timestamp):
             ENDPOINT, headers=HEADERS, params=params
         )
     except requests.exceptions.HTTPError as er:
-        logger.error('Http Error:=', er)
+        raise APIException(f'Http Error: {er}')
     except requests.exceptions.ConnectionError as er:
-        logger.error('Error Connecting:', er)
+        raise APIException(f'Error Connecting: {er}')
     except requests.exceptions.Timeout as er:
-        logger.error('Timeout Error:', er)
+        raise APIException(f'Timeout Error: {er}')
     except requests.exceptions.RequestException as er:
-        logger.error('Request Error:', er)
+        raise APIException(f'Request Error: {er}')
     count_exeptions = 0
     if homework_statuses.status_code != HTTPStatus.OK:
         count_exeptions += 1
@@ -77,8 +77,10 @@ def get_api_answer(current_timestamp):
         logger.info(f'Выполнен запрос к API с параметрами: {params} ')
         try:
             return homework_statuses.json()
-        except json.decoder.JSONDecodeError:
-            logger.error(' Результат запроса не представим в формате json')
+        except json.decoder.JSONDecodeError as er:
+            raise JsonException(
+                f'Результат запроса не представим в json: {er}'
+            )
 
 
 def check_response(response):
@@ -169,7 +171,10 @@ def main():
             logger.debug(error)
             time.sleep(RETRY_TIME)
 
-        except (TypeError, KeyError, UncorrectStatus, Exception) as error:
+        except (
+            APIException, JsonException, KeyError,
+            TypeError, UncorrectStatus, Exception
+        ) as error:
             message = f'Сбой в работе программы: {error}'
             logger.error(message)
             send_message(bot, message)

@@ -1,3 +1,15 @@
+class APIException(Exception):
+    """Вызывается в случае, если возникли проблемы с API Яндекс-практикума."""
+
+    pass
+
+
+class JsonException(Exception):
+    """Вызывается в случае, если возникли проблемы с приведением к json."""
+
+    pass
+
+
 class NotUpdates(Exception):
     """Вызывается в случае, если нет обновлений по проверке дз."""
 
