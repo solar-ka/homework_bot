@@ -42,8 +42,7 @@ def send_message(bot, message):
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
     except telegram.TelegramError as error:
         raise MessageException(f'Ошибка при отправке сообщения: {error}')
-    else:
-        logger.info(f'Бот отправил сообщение: "{message}"')
+    logger.info(f'Бот отправил сообщение: "{message}"')
 
 
 def get_api_answer(current_timestamp):
@@ -70,11 +69,10 @@ def get_api_answer(current_timestamp):
                 'Ошибка при запросе к основному API: ',
                 f'status_code={homework_statuses.status_code}'
             )
-        else:
-            raise Exception(
-                'Ошибка при запросе к основному API: ',
-                f'status_code={homework_statuses.status_code}'
-            )
+        raise Exception(
+            'Ошибка при запросе к основному API: ',
+            f'status_code={homework_statuses.status_code}'
+        )
     else:
         logger.info(f'Выполнен запрос к API с параметрами: {params} ')
         try:
